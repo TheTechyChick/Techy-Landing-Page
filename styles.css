@@ -556,40 +556,18 @@ a.btn-pill:active {
     position: absolute;
     top: 0;
     left: 0;
-    width: 9px;
-    height: 24px;
-    background: linear-gradient(180deg, var(--c1, #ffd4d9), var(--c2, #fa5267));
-    border-radius: 5px;
-    box-shadow:
-        0 6px 18px rgba(250, 82, 103, 0.18),
-        inset 0 1px 0 rgba(255, 255, 255, 0.55),
-        inset 0 -1px 0 rgba(230, 57, 70, 0.18);
+    width: 3px;
+    height: 6px;
+    background: var(--blue);
+    border-radius: 2px;
     opacity: 0;
-    transform: translate3d(-200px, -200px, 0) rotate(var(--r));
+    transform: translate3d(-200px, -200px, 0);
     will-change: transform, opacity;
-    animation: confettiFade 1200ms var(--ease) forwards;
-    animation-delay: calc(80ms * var(--i, 0));
 }
-
-.confetti span:nth-child(1)  { --i: 1; }
-.confetti span:nth-child(2)  { --i: 2; }
-.confetti span:nth-child(3)  { --i: 3; }
-.confetti span:nth-child(4)  { --i: 4; }
-.confetti span:nth-child(5)  { --i: 5; }
-.confetti span:nth-child(6)  { --i: 6; }
-.confetti span:nth-child(7)  { --i: 7; }
-.confetti span:nth-child(8)  { --i: 8; }
-.confetti span:nth-child(9)  { --i: 9; }
-.confetti span:nth-child(10) { --i: 10; }
-.confetti span:nth-child(11) { --i: 11; }
-.confetti span:nth-child(12) { --i: 12; }
-.confetti span:nth-child(13) { --i: 13; }
-.confetti span:nth-child(14) { --i: 14; }
-.confetti span:nth-child(15) { --i: 15; }
 
 @keyframes confettiFade {
     from { opacity: 0; }
-    to   { opacity: 0.92; }
+    to   { opacity: 0.8; }
 }
 
 /* ============================================================
@@ -598,6 +576,9 @@ a.btn-pill:active {
 .service {
     position: relative;
     padding: 120px 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
     border-top: none;
 }
 
@@ -778,11 +759,10 @@ a.btn-pill:active {
     font-weight: 600;
     font-size: clamp(3rem, 8.6vw, 6.75rem);
     line-height: 0.95;
-    letter-spacing: -0.045em;
+    letter-spacing: -0.02em;
     color: var(--rose-500);
-    margin: 0 0 36px;
+    margin: 0 0 56px;
     text-wrap: balance;
-    font-variant-numeric: tabular-nums;
 }
 
 .service-copy {
@@ -1394,11 +1374,6 @@ a.btn-pill:active {
         align-items: flex-start;
         gap: 12px;
     }
-
-    .confetti span {
-        width: 6px;
-        height: 16px;
-    }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1408,4 +1383,21 @@ a.btn-pill:active {
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
     }
+}
+
+/* Typing Cursor */
+.typing-cursor {
+    display: inline-block;
+    width: 3px;
+    height: 0.8em;
+    background-color: currentColor;
+    margin-left: 6px;
+    vertical-align: middle;
+    border-radius: 2px;
+    animation: blink 0.9s step-end infinite;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
 }

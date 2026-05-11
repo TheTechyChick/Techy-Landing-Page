@@ -2,6 +2,20 @@
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     /* ----------------------------------------------------------
+       Globe particle generation: 280 specks spanning a 3D sphere
+       ---------------------------------------------------------- */
+    const confettiContainer = document.querySelector('.confetti');
+    if (confettiContainer) {
+        const PARTICLE_COUNT = 280;
+        const PALETTE = ['#4285f4', '#ea4335', '#fbbc04', '#9c27b0'];
+        for (let i = 0; i < PARTICLE_COUNT; i++) {
+            const s = document.createElement('span');
+            s.style.background = PALETTE[Math.floor(Math.random() * PALETTE.length)];
+            confettiContainer.appendChild(s);
+        }
+    }
+
+    /* ----------------------------------------------------------
        Mobile menu toggle (small screens / no-hover devices)
        ---------------------------------------------------------- */
     const toggle = document.querySelector('.nav-toggle');
@@ -288,164 +302,174 @@
     }
 
     /* ----------------------------------------------------------
-       Confetti, free-floating viewport drift + mouse repulsion
-       Each particle carries position + velocity. Ambient meandering
-       acceleration nudges direction over time. Cursor adds a velocity
-       impulse so particles glide away and keep drifting (no snap-back).
-       Particles wrap around viewport edges for continuous motion.
+       3D globe: Fibonacci sphere + continuous rotation + cursor warp
+       Particles sit on a unit sphere distributed via the golden-angle
+       (Fibonacci) method for uniform surface coverage. Each frame the
+       globe rotates on its X and Y axes; depth cues (opacity + scale)
+       sell the 3D illusion. Cursor applies a screen-space magnetic warp
+       that decays back to the orbital position over ~10 frames.
        ---------------------------------------------------------- */
-    const particles = Array.from(document.querySelectorAll('.confetti span'));
+    const globeSpans = Array.from(document.querySelectorAll('.confetti span'));
 
-    if (particles.length && !reduceMotion) {
-        let viewW = window.innerWidth;
-        let viewH = window.innerHeight;
+    if (globeSpans.length && !reduceMotion) {
+        let viewW  = window.innerWidth;
+        let viewH  = window.innerHeight;
+        let globeR = Math.min(viewW, viewH) * 0.42;
+        let cx     = viewW / 2;
+        let cy     = viewH / 2;
 
-        const state = particles.map((el, i) => {
-            const cs = getComputedStyle(el);
-            const xPct = parseFloat(cs.getPropertyValue('--x')) || (Math.random() * 100);
-            const yPct = parseFloat(cs.getPropertyValue('--y')) || (Math.random() * 100);
-            const rot = parseFloat(cs.getPropertyValue('--r')) || 0;
-
-            return {
-                el,
-                x: (xPct / 100) * viewW,
-                y: (yPct / 100) * viewH,
-                vx: (Math.random() - 0.5) * 0.3,
-                vy: (Math.random() - 0.5) * 0.3,
-                rot,
-                rotV: (Math.random() - 0.5) * 0.25,
-                seedA: Math.random() * Math.PI * 2,
-                seedB: Math.random() * Math.PI * 2,
-                freqA: 0.18 + Math.random() * 0.14,
-                freqB: 0.09 + Math.random() * 0.09,
-            };
+        // Fibonacci (golden-angle) sphere — maximally even surface distribution
+        const N           = globeSpans.length;
+        const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+        const globeState  = globeSpans.map((el, i) => {
+            const y3  = 1 - (i / (N - 1)) * 2;
+            const r   = Math.sqrt(Math.max(0, 1 - y3 * y3));
+            const phi = goldenAngle * i;
+            return { el, x3: r * Math.cos(phi), y3, z3: r * Math.sin(phi), offsetX: 0, offsetY: 0 };
         });
-
-        // Paint initial positions immediately so particles don't flash at 0,0.
-        const paint = (p) => {
-            p.el.style.transform =
-                'translate3d(' + p.x.toFixed(2) + 'px,' + p.y.toFixed(2) + 'px,0) ' +
-                'rotate(' + p.rot.toFixed(2) + 'deg)';
-        };
-        state.forEach(paint);
 
         let mx = -10000;
         let my = -10000;
-
-        window.addEventListener('mousemove', (e) => {
-            mx = e.clientX;
-            my = e.clientY;
-        }, { passive: true });
-
-        document.addEventListener('mouseleave', () => {
-            mx = -10000;
-            my = -10000;
-        });
-
+        window.addEventListener('mousemove', (e) => { mx = e.clientX; my = e.clientY; }, { passive: true });
+        document.addEventListener('mouseleave', () => { mx = -10000; my = -10000; });
         window.addEventListener('resize', () => {
-            const newW = window.innerWidth;
-            const newH = window.innerHeight;
-            // Scale positions proportionally so particles stay relatively placed.
-            state.forEach((p) => {
-                p.x = (p.x / viewW) * newW;
-                p.y = (p.y / viewH) * newH;
-            });
-            viewW = newW;
-            viewH = newH;
+            viewW  = window.innerWidth;
+            viewH  = window.innerHeight;
+            globeR = Math.min(viewW, viewH) * 0.42;
+            cx     = viewW / 2;
+            cy     = viewH / 2;
         });
 
-        const RADIUS    = 170;   // px, cursor influence radius
-        const PUSH      = 1.45;  // velocity impulse strength near cursor
-        const AMBIENT   = 0.040; // ambient acceleration magnitude
-        const DAMPING   = 0.985; // per-frame velocity damping (60fps reference)
-        const ROT_DAMP  = 0.992;
-        const MAX_SPEED = 6.5;   // velocity cap so a fast cursor sweep doesn't fling
-        const MARGIN    = 40;    // px past edge before wrapping
+        let rotX = 0;
+        let rotY = 0;
+        const dRotX    = 0.0006;  // slow polar tilt per frame
+        const dRotY    = 0.0012;  // slow equatorial spin per frame
+        const CURSOR_R = 200;     // cursor influence radius (px)
+        const startTime = performance.now();
 
-        let lastT = performance.now();
+        const frameGlobe = (now) => {
+            const elapsed    = (now - startTime) / 1000;
+            const globalFade = Math.min(elapsed / 1.4, 1);  // 1.4 s fade-in on load
 
-        const frame = (now) => {
-            // Frame-rate-normalized step (1 = 60fps).
-            const dt = Math.min(2.5, Math.max(0.5, (now - lastT) / 16.6667));
-            lastT = now;
-            const t = now / 1000;
+            rotX += dRotX;
+            rotY += dRotY;
 
-            const damp = Math.pow(DAMPING, dt);
-            const rdmp = Math.pow(ROT_DAMP, dt);
+            const cosX      = Math.cos(rotX);
+            const sinX      = Math.sin(rotX);
+            const cosY      = Math.cos(rotY);
+            const sinY      = Math.sin(rotY);
+            const hasCursor = mx !== -10000;
 
-            for (let i = 0; i < state.length; i++) {
-                const p = state[i];
+            for (let i = 0; i < globeState.length; i++) {
+                const p = globeState[i];
 
-                // 1) Ambient meandering, two layered sine waves give an
-                //    irregular, non-repeating-feeling acceleration vector.
-                const ax =
-                    (Math.sin(t * p.freqA + p.seedA) +
-                     Math.sin(t * p.freqB * 0.93 + p.seedB * 1.7)) * AMBIENT;
-                const ay =
-                    (Math.cos(t * p.freqA * 1.07 + p.seedA * 1.3) +
-                     Math.cos(t * p.freqB + p.seedB * 0.6)) * AMBIENT;
+                // Y-axis rotation then X-axis rotation
+                const rx  =  p.x3 * cosY + p.z3 * sinY;
+                const ry  =  p.y3;
+                const rz  = -p.x3 * sinY + p.z3 * cosY;
 
-                p.vx += ax * dt;
-                p.vy += ay * dt;
+                const fx  =  rx;
+                const fy  =  ry * cosX - rz * sinX;
+                const fz  =  ry * sinX + rz * cosX;  // -1 = rear, +1 = front
 
-                // 2) Cursor repulsion as a velocity impulse, particle
-                //    accelerates away from cursor and KEEPS that momentum
-                //    when the cursor moves on (no spring-back).
-                const dx = p.x - mx;
-                const dy = p.y - my;
-                const d2 = dx * dx + dy * dy;
-                const r2 = RADIUS * RADIUS;
-                if (d2 < r2 && d2 > 0.25) {
-                    const dist = Math.sqrt(d2);
-                    const falloff = 1 - dist / RADIUS;
-                    const impulse = falloff * falloff * PUSH;
-                    p.vx += (dx / dist) * impulse * dt;
-                    p.vy += (dy / dist) * impulse * dt;
-                    // A tiny rotational kick gives an organic tumble.
-                    p.rotV += (Math.random() - 0.5) * impulse * 0.6;
+                // Orthographic 2D projection
+                const px  = cx + fx * globeR;
+                const py  = cy + fy * globeR;
+
+                // Depth cues: front hemisphere is brighter + slightly larger
+                const depth   = (fz + 1) * 0.5;
+                const opacity = (0.12 + depth * 0.78) * globalFade;
+                const scale   = 0.35 + depth * 0.65;
+
+                // Cursor magnetic warp: push particles away from cursor
+                if (hasCursor) {
+                    const wx   = px + p.offsetX - mx;
+                    const wy   = py + p.offsetY - my;
+                    const dist = Math.hypot(wx, wy);
+                    if (dist < CURSOR_R && dist > 0.5) {
+                        const ang = Math.atan2(wy, wx);
+                        const mag = (1 - dist / CURSOR_R) * 1.4;
+                        p.offsetX += Math.cos(ang) * mag;
+                        p.offsetY += Math.sin(ang) * mag;
+                    }
                 }
+                // Spring decay back toward the orbital position
+                p.offsetX *= 0.90;
+                p.offsetY *= 0.90;
 
-                // 3) Damping, keeps motion graceful without ever halting.
-                p.vx *= damp;
-                p.vy *= damp;
-                p.rotV *= rdmp;
+                const finalX = (px + p.offsetX).toFixed(1);
+                const finalY = (py + p.offsetY).toFixed(1);
 
-                // 4) Speed cap.
-                const speed = Math.hypot(p.vx, p.vy);
-                if (speed > MAX_SPEED) {
-                    p.vx = (p.vx / speed) * MAX_SPEED;
-                    p.vy = (p.vy / speed) * MAX_SPEED;
-                }
-
-                // 5) Integrate.
-                p.x += p.vx * dt;
-                p.y += p.vy * dt;
-                p.rot += p.rotV * dt;
-
-                // 6) Toroidal wrap, exit one edge, re-enter the other.
-                if (p.x < -MARGIN)         p.x = viewW + MARGIN;
-                else if (p.x > viewW + MARGIN) p.x = -MARGIN;
-                if (p.y < -MARGIN)         p.y = viewH + MARGIN;
-                else if (p.y > viewH + MARGIN) p.y = -MARGIN;
-
-                paint(p);
+                p.el.style.transform = 'translate3d(' + finalX + 'px,' + finalY + 'px,0) scale(' + scale.toFixed(3) + ')';
+                p.el.style.opacity   = opacity.toFixed(3);
             }
-            requestAnimationFrame(frame);
+
+            requestAnimationFrame(frameGlobe);
         };
 
-        requestAnimationFrame(frame);
-    } else if (particles.length) {
-        // Reduced motion, distribute statically across viewport.
-        particles.forEach((el) => {
-            const cs = getComputedStyle(el);
-            const xPct = parseFloat(cs.getPropertyValue('--x')) || 50;
-            const yPct = parseFloat(cs.getPropertyValue('--y')) || 50;
-            const rot = parseFloat(cs.getPropertyValue('--r')) || 0;
-            const x = (xPct / 100) * window.innerWidth;
-            const y = (yPct / 100) * window.innerHeight;
-            el.style.transform =
-                'translate3d(' + x + 'px,' + y + 'px,0) rotate(' + rot + 'deg)';
+        requestAnimationFrame(frameGlobe);
+    } else if (globeSpans.length) {
+        // Reduced motion: render globe statically at resting orientation
+        const N           = globeSpans.length;
+        const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+        const R           = Math.min(window.innerWidth, window.innerHeight) * 0.42;
+        const scx         = window.innerWidth  / 2;
+        const scy         = window.innerHeight / 2;
+        globeSpans.forEach((el, i) => {
+            const y3  = 1 - (i / (N - 1)) * 2;
+            const r   = Math.sqrt(Math.max(0, 1 - y3 * y3));
+            const phi = goldenAngle * i;
+            el.style.transform = 'translate3d(' + (scx + r * Math.cos(phi) * R).toFixed(1) + 'px,' + (scy + y3 * R).toFixed(1) + 'px,0)';
+            el.style.opacity   = '0.5';
         });
     }
 
+
+    /* ----------------------------------------------------------
+       Typing animation for service headers
+       Single textNode approach: all chars share one layout context
+       so kerning/letter-spacing apply correctly — no per-char bleed.
+       ---------------------------------------------------------- */
+    const typeHeaders = document.querySelectorAll('.service-title');
+    if (typeHeaders.length) {
+        typeHeaders.forEach(el => {
+            el.dataset.originalText = el.textContent.trim();
+            el.textContent = '';
+        });
+
+        if (reduceMotion) {
+            typeHeaders.forEach(el => {
+                el.textContent = el.dataset.originalText || '';
+            });
+        } else {
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (!entry.isIntersecting) return;
+                    const el = entry.target;
+                    if (el.dataset.typed) return;
+                    el.dataset.typed = 'true';
+                    observer.unobserve(el);
+
+                    const text     = el.dataset.originalText;
+                    const textNode = document.createTextNode('');
+                    const cursor   = document.createElement('span');
+                    cursor.className = 'typing-cursor';
+                    el.appendChild(textNode);
+                    el.appendChild(cursor);
+
+                    let i = 0;
+                    const typeChar = () => {
+                        if (i < text.length) {
+                            textNode.textContent = text.substring(0, ++i);
+                            setTimeout(typeChar, 38 + Math.random() * 52);
+                        }
+                    };
+                    setTimeout(typeChar, 180);
+                });
+            }, { threshold: 0.3 });
+            typeHeaders.forEach(h => observer.observe(h));
+        }
+    }
+
 })();
+
