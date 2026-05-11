@@ -358,7 +358,10 @@
             const sinX      = Math.sin(rotX);
             const cosY      = Math.cos(rotY);
             const sinY      = Math.sin(rotY);
-            const hasCursor = mx !== -10000;
+            const hasCursor  = mx !== -10000;
+            // Subtract scrollY so the globe stays fixed to its page position
+            // even though .confetti is position:fixed in the viewport.
+            const scrolledCy = cy - window.scrollY;
 
             for (let i = 0; i < globeState.length; i++) {
                 const p = globeState[i];
@@ -374,7 +377,7 @@
 
                 // Orthographic 2D projection
                 const px  = cx + fx * globeR;
-                const py  = cy + fy * globeR;
+                const py  = scrolledCy + fy * globeR;
 
                 // Depth cues: front hemisphere is brighter + slightly larger
                 const depth   = (fz + 1) * 0.5;
